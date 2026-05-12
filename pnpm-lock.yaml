@@ -17,6 +17,9 @@ importers:
       typegpu:
         specifier: ^0.10.2
         version: 0.10.2
+      wgpu-matrix:
+        specifier: ^3.4.2
+        version: 3.4.2
     devDependencies:
       eslint-plugin-typegpu:
         specifier: ^0.10.0
@@ -1059,6 +1062,9 @@ packages:
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
+  wgpu-matrix@3.4.2:
+    resolution: {integrity: sha512-IfZFbG7olEYBD76VCZy2TzqM57GKy3LT++AZh37tMHPPByO6R2h61zXGBZFNPi2IzxNivNi8y5dvze5PjaczjA==}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -1912,6 +1918,8 @@ snapshots:
       fsevents: 2.3.3
 
   webpack-virtual-modules@0.6.2: {}
+
+  wgpu-matrix@3.4.2: {}
 
   which@2.0.2:
     dependencies:

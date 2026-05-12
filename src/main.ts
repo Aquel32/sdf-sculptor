@@ -3,6 +3,7 @@ import "./style.css";
 import tgpu, { common, d, std } from "typegpu";
 import * as sdf from '@typegpu/sdf';
 import { PrepareUI } from "./ui-controls";
+import { Camera, setupFirstPersonCamera } from "./camera";
 
 
 const root = await tgpu.init();
@@ -14,6 +15,19 @@ PrepareUI();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
+
+const cameraUniform = root.createUniform(Camera);
+const { state, updatePosition } = setupFirstPersonCamera(
+  canvas,
+  {
+    initPos: d.vec3f(0, 0, -2),
+    speed: d.vec3f(0.001, 0.1, 1),
+    orbitSensitivity: 0.002,
+  },
+  (props) => {
+    cameraUniform.writePartial(props);
+  },
+);
 
 function sceneSdf(p: d.v3f) {
   "use gpu";
@@ -59,8 +73,8 @@ const pipeline = root.createRenderPipeline({
     "use gpu";
 
     const screen = uv * 2 - 1; // -1 to 1
-    const ro = d.vec3f(0, 0, -1); // ray origin
-    const rd = std.normalize(d.vec3f(screen, 1.25)); // ray direction
+    const ro = cameraUniform.$.position; // ray origin
+    const rd = std.normalize(cameraUniform.$.rotation.mul(d.vec4f(screen, 1.25, 1))).xyz; // ray direction
     const result = march(ro, rd); // x = distance, y = hit
 
     if (result.y < 1) { // ray didnt hit
@@ -77,6 +91,8 @@ const pipeline = root.createRenderPipeline({
 });
 
 function render() {
+  updatePosition();
+
   pipeline.withColorAttachment({ view: context }).draw(3);
 
   requestAnimationFrame(render);
