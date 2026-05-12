@@ -10,6 +10,7 @@ const root = await tgpu.init();
 
 export const boxPositionUniform = root.createUniform(d.vec3f);
 export const diskPositionUniform = root.createUniform(d.vec3f);
+export const smoothnessUniform = root.createUniform(d.f32);
 
 PrepareUI();
 
@@ -31,10 +32,10 @@ const { state, updatePosition } = setupFirstPersonCamera(
 
 function sceneSdf(p: d.v3f) {
   "use gpu";
-  const box = sdf.sdBox3d(p - boxPositionUniform.$, d.vec3f(0.12));
+  const box = sdf.sdBoxFrame3d(p - boxPositionUniform.$, d.vec3f(0.12), 0.01);
   const disk = sdf.sdSphere(p - diskPositionUniform.$, 0.1);
 
-  return sdf.opSmoothDifference(box, disk, 0.1);
+  return sdf.opSmoothUnion(box, disk, smoothnessUniform.$);
 }
 
 function normalAt(p: d.v3f) {

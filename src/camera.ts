@@ -3,7 +3,8 @@ import * as m from 'wgpu-matrix';
 
 export const Camera = d.struct({
     position: d.vec3f,
-    rotation: d.mat4x4f
+    rotation: d.mat4x4f,
+    mouse: d.vec2f
 });
 
 export interface CameraOptions {
@@ -29,19 +30,22 @@ export function setupFirstPersonCamera(
         position: options.initPos,
         yaw: 0,
         pitch: 0,
+        mouse: d.vec2f(0, 0),
     };
 
     function runCallback() {
         const position = cameraState.position;
         const pitch = cameraState.pitch;
         const yaw = cameraState.yaw;
+        const mouse = cameraState.mouse;
 
         const rotation = m.mat4.rotationY(yaw, d.mat4x4f()).mul(m.mat4.rotationX(pitch, d.mat4x4f()));
 
         callback(
             Camera({
                 position,
-                rotation
+                rotation,
+                mouse
             }),
         );
     }
@@ -50,6 +54,16 @@ export function setupFirstPersonCamera(
         cameraState.yaw += dx * options.orbitSensitivity;
         cameraState.pitch -= dy * options.orbitSensitivity;
         cameraState.pitch = std.clamp(cameraState.pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+
+        runCallback();
+    }
+
+    function moveMouse(x: number, y: number) {
+        "use gpu";
+        const rect = canvas.getBoundingClientRect();
+        const mouse = d.vec2f((x - rect.left) / rect.width, (y - rect.top) / rect.height);
+
+        cameraState.mouse = mouse;
 
         runCallback();
     }
@@ -81,6 +95,8 @@ export function setupFirstPersonCamera(
     });
 
     canvas.addEventListener("mousemove", (event: MouseEvent) => {
+        moveMouse(event.clientX, event.clientY);
+
         if (document.pointerLockElement !== canvas) {
             return;
         }
