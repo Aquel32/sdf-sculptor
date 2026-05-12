@@ -84,3 +84,8 @@ h2 {
 p {
   margin: 0;
 }
+
+div {
+  display: flex;
+  flex-direction: column;
+}
