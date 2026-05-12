@@ -3,7 +3,10 @@ import * as m from 'wgpu-matrix';
 
 export const Camera = d.struct({
     position: d.vec3f,
-    rotation: d.mat4x4f,
+    view: d.mat4x4f,
+    inverseView: d.mat4x4f,
+    projection: d.mat4x4f,
+    inverseProjection: d.mat4x4f,
     mouse: d.vec2f
 });
 
@@ -31,7 +34,6 @@ export function setupFirstPersonCamera(
         yaw: 0,
         pitch: 0,
         mouse: d.vec2f(0, 0),
-        rotation: d.mat4x4f(),
     };
 
     function runCallback() {
@@ -40,21 +42,28 @@ export function setupFirstPersonCamera(
         const yaw = cameraState.yaw;
         const mouse = cameraState.mouse;
 
-        const rotation = m.mat4.rotationY(yaw, d.mat4x4f()).mul(m.mat4.rotationX(pitch, d.mat4x4f()));
-        cameraState.rotation = rotation;
+        const target = position.add(
+            d.vec3f(std.cos(pitch) * std.sin(yaw), std.sin(pitch), std.cos(pitch) * std.cos(yaw)),
+        );
+
+        const view = calculateView(position, target);
+        const projection = calculateProj(canvas.clientWidth / canvas.clientHeight);
 
         callback(
             Camera({
                 position,
-                rotation,
+                view,
+                inverseView: invertMat(view),
+                projection,
+                inverseProjection: invertMat(projection),
                 mouse
             }),
         );
     }
 
     function rotateCamera(dx: number, dy: number) {
-        cameraState.yaw += dx * options.orbitSensitivity;
-        cameraState.pitch -= dy * options.orbitSensitivity;
+        cameraState.yaw -= dx * options.orbitSensitivity;
+        cameraState.pitch += dy * options.orbitSensitivity;
         cameraState.pitch = std.clamp(cameraState.pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
 
         runCallback();
@@ -143,10 +152,10 @@ export function setupFirstPersonCamera(
             cameraState.position = cameraState.position.sub(forward);
         }
         if (pressedKeys.has('a')) {
-            cameraState.position = cameraState.position.sub(left);
+            cameraState.position = cameraState.position.add(left);
         }
         if (pressedKeys.has('d')) {
-            cameraState.position = cameraState.position.add(left);
+            cameraState.position = cameraState.position.sub(left);
         }
         if (pressedKeys.has('shift')) {
             cameraState.position.y += moveSpeed;
@@ -160,4 +169,16 @@ export function setupFirstPersonCamera(
 
     runCallback();
     return { state: cameraState, updatePosition, cleanupCamera };
+}
+
+export function calculateView(position: d.v3f, target: d.v3f, up: d.v3f = d.vec3f(0, 1, 0)) {
+    return m.mat4.lookAt(position, target, up, d.mat4x4f());
+}
+
+export function calculateProj(aspectRatio: number, fov: number = Math.PI / 2, near: number = 0.001, far: number = 1000) {
+    return m.mat4.perspective(fov, aspectRatio, near, far, d.mat4x4f());
+}
+
+function invertMat(matrix: d.m4x4f) {
+    return m.mat4.invert(matrix, d.mat4x4f());
 }
