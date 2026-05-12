@@ -31,6 +31,7 @@ export function setupFirstPersonCamera(
         yaw: 0,
         pitch: 0,
         mouse: d.vec2f(0, 0),
+        rotation: d.mat4x4f(),
     };
 
     function runCallback() {
@@ -40,6 +41,7 @@ export function setupFirstPersonCamera(
         const mouse = cameraState.mouse;
 
         const rotation = m.mat4.rotationY(yaw, d.mat4x4f()).mul(m.mat4.rotationX(pitch, d.mat4x4f()));
+        cameraState.rotation = rotation;
 
         callback(
             Camera({
@@ -60,6 +62,7 @@ export function setupFirstPersonCamera(
 
     function moveMouse(x: number, y: number) {
         "use gpu";
+
         const rect = canvas.getBoundingClientRect();
         const mouse = d.vec2f((x - rect.left) / rect.width, (y - rect.top) / rect.height);
 

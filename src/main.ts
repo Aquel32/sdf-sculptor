@@ -18,7 +18,7 @@ const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
 
 const cameraUniform = root.createUniform(Camera);
-const { state, updatePosition } = setupFirstPersonCamera(
+const { state: cameraState, updatePosition } = setupFirstPersonCamera(
   canvas,
   {
     initPos: d.vec3f(0, 0, -2),
@@ -30,12 +30,70 @@ const { state, updatePosition } = setupFirstPersonCamera(
   },
 );
 
+const MAX_DYNAMIC_SPHERES = 1000;
+const dynamicSpheresBuffer = root.createBuffer(d.arrayOf(d.vec4f, MAX_DYNAMIC_SPHERES)).$usage("storage");
+const dynamicSpheresCountBuffer = root.createBuffer(d.u32).$usage("storage");
+dynamicSpheresCountBuffer.write(0);
+
+const mainLayout = tgpu.bindGroupLayout({
+  spheres: { storage: d.arrayOf(d.vec4f), access: "mutable" },
+  count: { storage: d.u32, access: "mutable" },
+});
+
+const mainBindGroup = root.createBindGroup(mainLayout, {
+  spheres: dynamicSpheresBuffer,
+  count: dynamicSpheresCountBuffer,
+});
+
+const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => {
+  "use gpu";
+
+  if (mainLayout.$.count >= MAX_DYNAMIC_SPHERES) {
+    return;
+  }
+
+  const ro = cameraUniform.$.position; // ray origin
+  const screen = cameraUniform.$.mouse * 2 - 1; // -1 to 1
+
+  const rd = std.normalize(cameraUniform.$.rotation.mul(d.vec4f(screen, 1.25, 1))).xyz; // ray direction
+  const result = march(ro, rd); // x = distance, y = hit
+
+  if (result.y < 1) {
+    return;
+  }
+
+
+  const r = 0.1;
+  const p = ro + rd * result.x - rd * r
+
+  mainLayout.$.spheres[mainLayout.$.count] = d.vec4f(p, r);
+  mainLayout.$.count = mainLayout.$.count + 1;
+})
+
+window.addEventListener("keydown", (event: KeyboardEvent) => {
+  if (event.key.toLowerCase() === "e") {
+    addDynamicSphereComputePipeline.
+      with(mainBindGroup).
+      dispatchThreads();
+  }
+});
+
 function sceneSdf(p: d.v3f) {
   "use gpu";
   const box = sdf.sdBoxFrame3d(p - boxPositionUniform.$, d.vec3f(0.12), 0.01);
   const disk = sdf.sdSphere(p - diskPositionUniform.$, 0.1);
 
-  return sdf.opSmoothUnion(box, disk, smoothnessUniform.$);
+  let result = sdf.opSmoothUnion(box, disk, smoothnessUniform.$);
+
+  for (let i = d.u32(0); i < mainLayout.$.count; i++) {
+    const spherePos = mainLayout.$.spheres[i].xyz;
+    const sphereRadius = mainLayout.$.spheres[i].w;
+
+    const sphereSdf = sdf.sdSphere(p - spherePos, sphereRadius);
+    result = sdf.opSmoothUnion(result, sphereSdf, smoothnessUniform.$);
+  }
+
+  return result;
 }
 
 function normalAt(p: d.v3f) {
@@ -94,7 +152,10 @@ const pipeline = root.createRenderPipeline({
 function render() {
   updatePosition();
 
-  pipeline.withColorAttachment({ view: context }).draw(3);
+  pipeline.
+    withColorAttachment({ view: context }).
+    with(mainBindGroup).
+    draw(3);
 
   requestAnimationFrame(render);
 }
