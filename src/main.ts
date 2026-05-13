@@ -9,6 +9,12 @@ import { aabbSphere, frustumIntersectsAABB, rayAABBIntersection } from "./distan
 
 const root = await tgpu.init();
 
+const tiles = d.vec2u(2, 2);
+export function setTiles(x: number, y: number) {
+  tiles.x = x;
+  tiles.y = y;
+}
+
 let smoothness = 0.001;
 export const smoothnessUniform = root.createUniform(d.f32);
 export function setSmoothness(value: number) {
@@ -303,10 +309,16 @@ function frustumTest() {
   }
 }
 
+function prepareTiles() {
+
+}
+
 function render() {
   updatePosition();
 
   // frustumTest();
+
+  prepareTiles();
 
   tilePipeline.
     with(mainBindGroup).
