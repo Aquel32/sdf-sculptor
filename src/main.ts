@@ -12,7 +12,13 @@ const root = await tgpu.init();
 export const boxPositionUniform = root.createUniform(d.vec3f);
 export const diskPositionUniform = root.createUniform(d.vec3f);
 export const smoothnessUniform = root.createUniform(d.f32);
-export const debugBoundingsUniform = root.createUniform(d.u32);
+
+let debugBoundings = 0;
+const debugBoundingsUniform = root.createUniform(d.u32);
+export function setDebugBoundings(value: number) {
+  debugBoundings = value;
+  debugBoundingsUniform.write(value);
+}
 
 PrepareUI();
 
@@ -34,11 +40,14 @@ const { state: cameraState, updatePosition } = setupFirstPersonCamera(
 
 const MAX_DYNAMIC_SPHERES = 1000;
 const dynamicSpheresBuffer = root.createBuffer(d.arrayOf(d.vec4f, MAX_DYNAMIC_SPHERES)).$usage("storage");
-const dynamicSpheresCountBuffer = root.createBuffer(d.u32).$usage("storage");
-dynamicSpheresCountBuffer.write(1);
 
-const test = new Float32Array([0, 0, 0, 0.1]);
-dynamicSpheresBuffer.write(test);
+let dynamicSpheresCount = 1;
+const dynamicSpheresCountBuffer = root.createBuffer(d.u32).$usage("storage");
+dynamicSpheresCountBuffer.write(dynamicSpheresCount);
+
+const dynamicSpheresArray = new Float32Array(MAX_DYNAMIC_SPHERES * 4);
+dynamicSpheresArray.set([0, 0, 0, 0.1], 0); // initial sphere
+dynamicSpheresBuffer.write(dynamicSpheresArray);
 
 const mainLayout = tgpu.bindGroupLayout({
   spheres: { storage: d.arrayOf(d.vec4f), access: "mutable" },
@@ -50,6 +59,7 @@ const mainBindGroup = root.createBindGroup(mainLayout, {
   count: dynamicSpheresCountBuffer,
 });
 
+const foundPositionMutable = root.createMutable(d.vec4f);
 const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => {
   "use gpu";
 
@@ -70,16 +80,40 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
   const r = 0.1;
   const p = ro + rd * result.x - rd * r
 
-  mainLayout.$.spheres[mainLayout.$.count] = d.vec4f(p, r);
-  mainLayout.$.count = mainLayout.$.count + 1;
-  console.log("Added sphere", mainLayout.$.count);
+  // if (debugBoundingsUniform.$ > 0) {
+  //   return;
+  // }
+
+  foundPositionMutable.$ = d.vec4f(p, r);
+  // mainLayout.$.spheres[mainLayout.$.count] = d.vec4f(p, r);
+  // mainLayout.$.count = mainLayout.$.count + 1;
+  // console.log("Added sphere", mainLayout.$.count);
 })
 
-window.addEventListener("keydown", (event: KeyboardEvent) => {
+window.addEventListener("keydown", async (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === "e") {
     addDynamicSphereComputePipeline.
       with(mainBindGroup).
       dispatchThreads();
+
+    if (debugBoundings === 1) {
+      return;
+    }
+
+    const foundPosition = await foundPositionMutable.read();
+
+    dynamicSpheresCount++;
+    dynamicSpheresCountBuffer.write(dynamicSpheresCount);
+
+    const index = (dynamicSpheresCount - 1) * 4;
+    dynamicSpheresArray[index] = foundPosition.x;
+    dynamicSpheresArray[index + 1] = foundPosition.y;
+    dynamicSpheresArray[index + 2] = foundPosition.z;
+    dynamicSpheresArray[index + 3] = foundPosition.w;
+
+    dynamicSpheresBuffer.write(dynamicSpheresArray);
+
+    console.log("Added sphere", dynamicSpheresCount);
   }
 });
 
@@ -120,6 +154,7 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
   let hit = d.f32(0);
 
   let closestIntersection = d.f32(9090);
+  let farthestIntersection = d.f32(-1);
   for (let i = d.u32(0); i < mainLayout.$.count; i++) {
     const spherePos = mainLayout.$.spheres[i].xyz;
     const sphereRadius = mainLayout.$.spheres[i].w;
@@ -127,8 +162,9 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
     const aabb = aabbSphere(spherePos, sphereRadius, smoothnessUniform.$);
     const intersection = rayAABBIntersection(ro, rd, aabb);
 
-    if (intersection !== -1) {
-      closestIntersection = std.min(closestIntersection, intersection);
+    if (intersection.near !== -1) {
+      closestIntersection = std.min(closestIntersection, intersection.near);
+      farthestIntersection = std.max(farthestIntersection, intersection.far);
     }
   }
 
@@ -140,7 +176,7 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
 
   if (debugBoundingsUniform.$ > 0) {
     if (asd) {
-      console.log("t", t);
+      console.log("t", closestIntersection, farthestIntersection);
     }
 
     hit = 1;
@@ -155,14 +191,14 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
       break;
     }
     t += dist;
-    if (t > 6) {
+    if (t > farthestIntersection) {
       break;
     }
     stepsDone = i;
   }
 
   if (asd) {
-    console.log("Steps done: ", stepsDone, t);
+    console.log("Steps done: ", stepsDone, t, closestIntersection, farthestIntersection);
   }
 
   return d.vec2f(t, hit);

@@ -1,5 +1,5 @@
 import { d } from "typegpu";
-import { boxPositionUniform, debugBoundingsUniform, diskPositionUniform, smoothnessUniform } from "./main";
+import { boxPositionUniform, diskPositionUniform, setDebugBoundings, smoothnessUniform } from "./main";
 
 export function PrepareUI() {
     document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
@@ -31,10 +31,11 @@ export function PrepareUI() {
         const debugBoundings = (document.querySelector<HTMLInputElement>("#debugBoundings")!).checked;
         const debugBoundingsValue = debugBoundings ? 1 : 0;
 
+
         boxPositionUniform.write(d.vec3f(boxX, boxY, 0));
         diskPositionUniform.write(d.vec3f(diskX, diskY, 0));
         smoothnessUniform.write(k);
-        debugBoundingsUniform.write(debugBoundingsValue);
+        setDebugBoundings(debugBoundingsValue);
     }
 
     updateUniforms();

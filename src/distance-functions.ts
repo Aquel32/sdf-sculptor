@@ -1,4 +1,5 @@
 import { d, std } from "typegpu";
+import { min } from "typegpu/std";
 
 export const AABB = d.struct({
     min: d.vec3f,
@@ -33,7 +34,12 @@ export function aabbCube(center: d.v3f, halfSize: number) {
     });
 }
 
-export function rayAABBIntersection(rayOrigin: d.v3f, rayDir: d.v3f, aabb: d.Infer<typeof AABB>): number {
+export const Intersection = d.struct({
+    near: d.f32,
+    far: d.f32,
+});
+
+export function rayAABBIntersection(rayOrigin: d.v3f, rayDir: d.v3f, aabb: d.Infer<typeof AABB>) {
     "use gpu";
 
     const tMin = d.vec3f(
@@ -59,8 +65,14 @@ export function rayAABBIntersection(rayOrigin: d.v3f, rayDir: d.v3f, aabb: d.Inf
     );
 
     if (tFar > 0 && tNear <= tFar) {
-        return std.max(tNear, 0);
+        return Intersection({
+            near: std.max(tNear, 0),
+            far: tFar,
+        })
     }
 
-    return -1;
+    return Intersection({
+        near: -1,
+        far: -1,
+    })
 };
