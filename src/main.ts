@@ -4,14 +4,17 @@ import tgpu, { common, d, std } from "typegpu";
 import * as sdf from '@typegpu/sdf';
 import { PrepareUI } from "./ui-controls";
 import { Camera, setupFirstPersonCamera } from "./camera";
-import { aabbSphere, rayAABBIntersection } from "./distance-functions";
+import { aabbSphere, frustumIntersectsAABB, rayAABBIntersection } from "./distance-functions";
 
 
 const root = await tgpu.init();
 
-export const boxPositionUniform = root.createUniform(d.vec3f);
-export const diskPositionUniform = root.createUniform(d.vec3f);
+let smoothness = 0.001;
 export const smoothnessUniform = root.createUniform(d.f32);
+export function setSmoothness(value: number) {
+  smoothness = value;
+  smoothnessUniform.write(value);
+}
 
 let debugBoundings = 0;
 const debugBoundingsUniform = root.createUniform(d.u32);
@@ -25,8 +28,19 @@ PrepareUI();
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
 
+const finalTexture = root.createTexture({
+  size: [canvas.clientWidth, canvas.clientHeight],
+  format: "rgba8unorm",
+}).$usage("storage", "sampled");
+const writeView = finalTexture.createView(d.textureStorage2d("rgba8unorm", "write-only"));
+const sampledView = finalTexture.createView(d.texture2d());
+const sampler = root.createSampler({
+  magFilter: "linear",
+  minFilter: "linear",
+});
+
 const cameraUniform = root.createUniform(Camera);
-const { state: cameraState, updatePosition } = setupFirstPersonCamera(
+const { state: cameraState, updatePosition, updateFrustum } = setupFirstPersonCamera(
   canvas,
   {
     initPos: d.vec3f(0, 0.12, -0.01),
@@ -85,6 +99,10 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
 })
 
 window.addEventListener("keydown", async (event: KeyboardEvent) => {
+  if (event.key.toLowerCase() === "f") {
+    updateFrustum();
+  }
+
   if (event.key.toLowerCase() === "e") {
     addDynamicSphereComputePipeline.
       with(mainBindGroup).
@@ -223,39 +241,79 @@ const pipeline = root.createRenderPipeline({
   fragment: ({ uv }) => {
     "use gpu";
 
-    const ray = getRay(uv);
-    const ro = ray.ro;
-    const rd = ray.rd;
-
-    const result = march(ro, rd, false); // x = distance, y = hit
-
-    if (debugBoundingsUniform.$ > 0) {
-      if (result.x === 0) {
-        return d.vec4f(0, 0, 0, 1);
-      }
-
-      return d.vec4f(1, 0, 0, 1);
-    }
-
-    if (result.y < 1) { // ray didnt hit
-      return d.vec4f(0, 0, 0, 1); // bg
-    }
-
-    const p = ro + rd * result.x; // hit point
-    const normal = normalAt(p);
-    const lightDir = std.normalize(d.vec3f(-0.35, 0.7, -0.55));
-    const diffuse = 0.2 + std.max(std.dot(normal, lightDir), 0) * 0.8;
-
-    return d.vec4f(1, 0, 0, 1) * diffuse;
+    const color = std.textureSample(sampledView.$, sampler.$, uv);
+    return color;
   },
 });
+
+function writeToTexture(xy: d.v2i, color: d.v4f) {
+  "use gpu";
+  std.textureStore(writeView.$, xy, color);
+}
+
+const tilePipeline = root.createGuardedComputePipeline((x, y) => {
+  "use gpu";
+  const xy = d.vec2i(x, y);
+  const uv = d.vec2f(xy) / d.vec2f(std.textureDimensions(writeView.$));
+
+  const ray = getRay(uv);
+  const ro = ray.ro;
+  const rd = ray.rd;
+
+  const result = march(ro, rd, false); // x = distance, y = hit
+
+  if (debugBoundingsUniform.$ > 0) {
+    if (result.x === 0) {
+      writeToTexture(xy, d.vec4f(0, 0, 0, 1));
+      return;
+    }
+
+    writeToTexture(xy, d.vec4f(1, 0, 0, 1));
+    return;
+  }
+
+  if (result.y < 1) { // ray didnt hit
+    writeToTexture(xy, d.vec4f(0, 0, 0, 1));
+    return;
+  }
+
+  const p = ro + rd * result.x; // hit point
+  const normal = normalAt(p);
+  const lightDir = std.normalize(d.vec3f(-0.35, 0.7, -0.55));
+  const diffuse = 0.2 + std.max(std.dot(normal, lightDir), 0) * 0.8;
+
+  const color = d.vec4f(1, 0, 0, 1) * diffuse;
+  writeToTexture(xy, color);
+});
+
+function frustumTest() {
+  for (let i = 0; i < dynamicSpheresCount; i++) {
+    const index = i * 4;
+    const pos = d.vec3f(dynamicSpheresArray[index], dynamicSpheresArray[index + 1], dynamicSpheresArray[index + 2]);
+    const radius = dynamicSpheresArray[index + 3];
+
+    const aabb = aabbSphere(pos, radius, smoothness);
+
+    if (frustumIntersectsAABB(cameraState.frustum, aabb)) {
+      console.log("Sphere", i, "is visible");
+    }
+    else {
+      console.log("Sphere", i, "is NOT visible");
+    }
+  }
+}
 
 function render() {
   updatePosition();
 
+  // frustumTest();
+
+  tilePipeline.
+    with(mainBindGroup).
+    dispatchThreads(canvas.width, canvas.height);
+
   pipeline.
     withColorAttachment({ view: context }).
-    with(mainBindGroup).
     draw(3);
 
   requestAnimationFrame(render);

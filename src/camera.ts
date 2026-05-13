@@ -7,7 +7,7 @@ export const Camera = d.struct({
     inverseView: d.mat4x4f,
     projection: d.mat4x4f,
     inverseProjection: d.mat4x4f,
-    mouse: d.vec2f
+    mouse: d.vec2f,
 });
 
 export interface CameraOptions {
@@ -34,6 +34,9 @@ export function setupFirstPersonCamera(
         yaw: 0,
         pitch: 0,
         mouse: d.vec2f(0, 0),
+        frustum: d.arrayOf(d.vec4f, 6)(),
+        view: d.mat4x4f(),
+        projection: d.mat4x4f(),
     };
 
     function runCallback() {
@@ -49,6 +52,11 @@ export function setupFirstPersonCamera(
         const view = calculateView(position, target);
         const projection = calculateProj(canvas.clientWidth / canvas.clientHeight);
 
+        cameraState.view = view;
+        cameraState.projection = projection;
+
+        updateFrustum();
+
         callback(
             Camera({
                 position,
@@ -56,9 +64,14 @@ export function setupFirstPersonCamera(
                 inverseView: invertMat(view),
                 projection,
                 inverseProjection: invertMat(projection),
-                mouse
+                mouse,
             }),
         );
+    }
+
+    function updateFrustum() {
+        const viewProj = cameraState.projection.mul(cameraState.view);
+        cameraState.frustum = frustumFromViewProjection(viewProj);
     }
 
     function rotateCamera(dx: number, dy: number) {
@@ -168,7 +181,7 @@ export function setupFirstPersonCamera(
 
 
     runCallback();
-    return { state: cameraState, updatePosition, cleanupCamera };
+    return { state: cameraState, updatePosition, cleanupCamera, updateFrustum };
 }
 
 export function calculateView(position: d.v3f, target: d.v3f, up: d.v3f = d.vec3f(0, 1, 0)) {
@@ -181,4 +194,81 @@ export function calculateProj(aspectRatio: number, fov: number = Math.PI / 2, ne
 
 function invertMat(matrix: d.m4x4f) {
     return m.mat4.invert(matrix, d.mat4x4f());
+}
+
+export function frustumFromViewProjection(viewProj: d.m4x4f) {
+    // Matrix is column-major in wgpu-matrix
+    // Row 0: m[0], m[4], m[8], m[12]
+    // Row 1: m[1], m[5], m[9], m[13]
+    // Row 2: m[2], m[6], m[10], m[14]
+    // Row 3: m[3], m[7], m[11], m[15]
+
+    // Left plane: row3 + row0
+    const left = normalizePlane(
+        viewProj[3] + viewProj[0],
+        viewProj[7] + viewProj[4],
+        viewProj[11] + viewProj[8],
+        viewProj[15] + viewProj[12],
+    );
+
+    // Right plane: row3 - row0
+    const right = normalizePlane(
+        viewProj[3] - viewProj[0],
+        viewProj[7] - viewProj[4],
+        viewProj[11] - viewProj[8],
+        viewProj[15] - viewProj[12],
+    );
+
+    // Bottom plane: row3 + row1
+    const bottom = normalizePlane(
+        viewProj[3] + viewProj[1],
+        viewProj[7] + viewProj[5],
+        viewProj[11] + viewProj[9],
+        viewProj[15] + viewProj[13],
+    );
+
+    // Top plane: row3 - row1
+    const top = normalizePlane(
+        viewProj[3] - viewProj[1],
+        viewProj[7] - viewProj[5],
+        viewProj[11] - viewProj[9],
+        viewProj[15] - viewProj[13],
+    );
+
+    // Near plane: row3 + row2
+    const near = normalizePlane(
+        viewProj[3] + viewProj[2],
+        viewProj[7] + viewProj[6],
+        viewProj[11] + viewProj[10],
+        viewProj[15] + viewProj[14],
+    );
+
+    // Far plane: row3 - row2
+    const far = normalizePlane(
+        viewProj[3] - viewProj[2],
+        viewProj[7] - viewProj[6],
+        viewProj[11] - viewProj[10],
+        viewProj[15] - viewProj[14],
+    );
+
+    return [
+        left,
+        right,
+        bottom,
+        top,
+        near,
+        far
+    ];
+}
+
+function createPlane(normal: d.v3f, distance: number) {
+    return d.vec4f(normal, distance);
+}
+
+function normalizePlane(a: number, b: number, c: number, dd: number) {
+    const len = Math.sqrt(a * a + b * b + c * c);
+    if (len === 0) {
+        return createPlane(d.vec3f(0, 0, 0), 0);
+    }
+    return createPlane(d.vec3f(a / len, b / len, c / len), dd / len);
 }

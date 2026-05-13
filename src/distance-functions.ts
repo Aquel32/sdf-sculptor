@@ -1,4 +1,5 @@
 import { d, std } from "typegpu";
+import type { Infer } from "typegpu/data";
 import { min } from "typegpu/std";
 
 export const AABB = d.struct({
@@ -76,3 +77,29 @@ export function rayAABBIntersection(rayOrigin: d.v3f, rayDir: d.v3f, aabb: d.Inf
         far: -1,
     })
 };
+
+export function frustumIntersectsAABB(frustum: d.v4f[], aabb: Infer<typeof AABB>): boolean {
+    for (let i = 0; i < frustum.length; i++) {
+
+        const normal = frustum[i].xyz;
+        const distance = frustum[i].w;
+
+        // Find the p-vertex (vertex most in the direction of the plane normal)
+        const px = normal.x >= 0 ? aabb.max.x : aabb.min.x;
+        const py = normal.y >= 0 ? aabb.max.y : aabb.min.y;
+        const pz = normal.z >= 0 ? aabb.max.z : aabb.min.z;
+
+        // If the p-vertex is outside this plane, the AABB is completely outside
+        const dist =
+            normal.x * px +
+            normal.y * py +
+            normal.z * pz +
+            distance;
+
+        if (dist < 0) {
+            return false;
+        }
+    };
+
+    return true;
+}
