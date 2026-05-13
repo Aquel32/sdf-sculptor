@@ -74,20 +74,14 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
   const result = march(ro, rd, true); // x = distance, y = hit
 
   if (result.y < 1) {
+    foundPositionMutable.$ = d.vec4f(0, 0, 0, 0);
     return;
   }
 
   const r = 0.1;
   const p = ro + rd * result.x - rd * r
 
-  // if (debugBoundingsUniform.$ > 0) {
-  //   return;
-  // }
-
   foundPositionMutable.$ = d.vec4f(p, r);
-  // mainLayout.$.spheres[mainLayout.$.count] = d.vec4f(p, r);
-  // mainLayout.$.count = mainLayout.$.count + 1;
-  // console.log("Added sphere", mainLayout.$.count);
 })
 
 window.addEventListener("keydown", async (event: KeyboardEvent) => {
@@ -101,6 +95,10 @@ window.addEventListener("keydown", async (event: KeyboardEvent) => {
     }
 
     const foundPosition = await foundPositionMutable.read();
+
+    if (std.allEq(foundPosition, d.vec4f(0, 0, 0, 0))) {
+      return;
+    }
 
     dynamicSpheresCount++;
     dynamicSpheresCountBuffer.write(dynamicSpheresCount);
