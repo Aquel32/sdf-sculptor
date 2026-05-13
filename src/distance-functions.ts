@@ -19,8 +19,8 @@ export function aabbSphere(center: d.v3f, radius: number, smoothness: number) {
     "use gpu";
     const r = d.vec3f(radius);
     return AABB({
-        min: center - (r * d.f32(1 + smoothness)),
-        max: center + (r * d.f32(1 + smoothness))
+        min: center - (r * d.f32(1) + smoothness),
+        max: center + (r * d.f32(1) + smoothness)
     });
 }
 
@@ -47,20 +47,19 @@ export function rayAABBIntersection(rayOrigin: d.v3f, rayDir: d.v3f, aabb: d.Inf
         (aabb.max.z - rayOrigin.z) / rayDir.z,
     );
 
-    const tNear = Math.max(
-        Math.min(tMin.x, tMax.x),
-        Math.min(tMin.y, tMax.y),
-        Math.min(tMin.z, tMax.z),
+    const tNear = std.max(
+        std.min(tMin.x, tMax.x),
+        std.min(tMin.y, tMax.y),
+        std.min(tMin.z, tMax.z),
     );
-    const tFar = Math.min(
-        Math.max(tMin.x, tMax.x),
-        Math.max(tMin.y, tMax.y),
-        Math.max(tMin.z, tMax.z),
+    const tFar = std.min(
+        std.max(tMin.x, tMax.x),
+        std.max(tMin.y, tMax.y),
+        std.max(tMin.z, tMax.z),
     );
 
-    if (tNear <= tFar) {
-        // Ray intersects AABB
-        return tNear;
+    if (tFar > 0 && tNear <= tFar) {
+        return std.max(tNear, 0);
     }
 
     return -1;

@@ -23,8 +23,8 @@ const cameraUniform = root.createUniform(Camera);
 const { state: cameraState, updatePosition } = setupFirstPersonCamera(
   canvas,
   {
-    initPos: d.vec3f(0, 0, -1),
-    speed: d.vec3f(0.001, 0.1, 1),
+    initPos: d.vec3f(0, 0.12, -0.01),
+    speed: d.vec3f(0.001, 0.01, 1),
     orbitSensitivity: 0.002,
   },
   (props) => {
@@ -120,7 +120,6 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
   let hit = d.f32(0);
 
   let closestIntersection = d.f32(9090);
-  let farthestIntersection = d.f32(0);
   for (let i = d.u32(0); i < mainLayout.$.count; i++) {
     const spherePos = mainLayout.$.spheres[i].xyz;
     const sphereRadius = mainLayout.$.spheres[i].w;
@@ -130,27 +129,25 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
 
     if (intersection !== -1) {
       closestIntersection = std.min(closestIntersection, intersection);
-      farthestIntersection = std.max(farthestIntersection, intersection);
     }
   }
 
+  // ray didnt hit, skip marching
   if (closestIntersection === 9090) {
     return d.vec2f(t, hit);
   }
-
-  if (closestIntersection !== 9090) {
-    t = closestIntersection;
-  }
+  t = closestIntersection;
 
   if (debugBoundingsUniform.$ > 0) {
-    if (closestIntersection !== 9090) {
-      hit = 1;
+    if (asd) {
+      console.log("t", t);
     }
 
+    hit = 1;
     return d.vec2f(t, hit);
   }
 
-  let done = 0;
+  let stepsDone = 0;
   for (let i = 0; i < 32; i++) {
     const dist = sceneSdf(ro + rd * t);
     if (dist < 0.002) {
@@ -161,11 +158,11 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
     if (t > 6) {
       break;
     }
-    done = i;
+    stepsDone = i;
   }
 
   if (asd) {
-    console.log("Steps done: ", done, t, farthestIntersection, closestIntersection);
+    console.log("Steps done: ", stepsDone, t);
   }
 
   return d.vec2f(t, hit);
