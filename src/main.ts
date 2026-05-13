@@ -12,6 +12,7 @@ const root = await tgpu.init();
 export const boxPositionUniform = root.createUniform(d.vec3f);
 export const diskPositionUniform = root.createUniform(d.vec3f);
 export const smoothnessUniform = root.createUniform(d.f32);
+export const debugBoundingsUniform = root.createUniform(d.u32);
 
 PrepareUI();
 
@@ -71,6 +72,7 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
 
   mainLayout.$.spheres[mainLayout.$.count] = d.vec4f(p, r);
   mainLayout.$.count = mainLayout.$.count + 1;
+  console.log("Added sphere", mainLayout.$.count);
 })
 
 window.addEventListener("keydown", (event: KeyboardEvent) => {
@@ -83,10 +85,8 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
 
 function sceneSdf(p: d.v3f) {
   "use gpu";
-  const box = sdf.sdBoxFrame3d(p - boxPositionUniform.$, d.vec3f(0.12), 0.01);
-  const disk = sdf.sdSphere(p - diskPositionUniform.$, 0.1);
 
-  let result = sdf.opSmoothUnion(box, disk, smoothnessUniform.$);
+  let result = d.f32(1);
 
   for (let i = d.u32(0); i < mainLayout.$.count; i++) {
     const spherePos = mainLayout.$.spheres[i].xyz;
@@ -119,27 +119,38 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
   let t = d.f32(0);
   let hit = d.f32(0);
 
-  // let closestIntersection = d.f32(9090);
-  // for (let i = d.u32(0); i < mainLayout.$.count; i++) {
-  //   const spherePos = mainLayout.$.spheres[i].xyz;
-  //   const sphereRadius = mainLayout.$.spheres[i].w;
+  let closestIntersection = d.f32(9090);
+  let farthestIntersection = d.f32(0);
+  for (let i = d.u32(0); i < mainLayout.$.count; i++) {
+    const spherePos = mainLayout.$.spheres[i].xyz;
+    const sphereRadius = mainLayout.$.spheres[i].w;
 
-  //   const aabb = aabbSphere(spherePos, sphereRadius, smoothnessUniform.$);
-  //   const intersection = rayAABBIntersection(ro, rd, aabb);
+    const aabb = aabbSphere(spherePos, sphereRadius, smoothnessUniform.$);
+    const intersection = rayAABBIntersection(ro, rd, aabb);
 
-  //   if (intersection !== -1) {
-  //     closestIntersection = std.min(closestIntersection, intersection);
-  //   }
-  // }
+    if (intersection !== -1) {
+      closestIntersection = std.min(closestIntersection, intersection);
+      farthestIntersection = std.max(farthestIntersection, intersection);
+    }
+  }
 
-  // if (closestIntersection !== 9090) {
-  //   t = closestIntersection;
-  // }
+  if (closestIntersection === 9090) {
+    return d.vec2f(t, hit);
+  }
 
-  // if (asd) {
-  //   console.log(t, closestIntersection);
-  // }
+  if (closestIntersection !== 9090) {
+    t = closestIntersection;
+  }
 
+  if (debugBoundingsUniform.$ > 0) {
+    if (closestIntersection !== 9090) {
+      hit = 1;
+    }
+
+    return d.vec2f(t, hit);
+  }
+
+  let done = 0;
   for (let i = 0; i < 32; i++) {
     const dist = sceneSdf(ro + rd * t);
     if (dist < 0.002) {
@@ -150,6 +161,11 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
     if (t > 6) {
       break;
     }
+    done = i;
+  }
+
+  if (asd) {
+    console.log("Steps done: ", done, t, farthestIntersection, closestIntersection);
   }
 
   return d.vec2f(t, hit);
@@ -180,14 +196,15 @@ const pipeline = root.createRenderPipeline({
     const ro = ray.ro;
     const rd = ray.rd;
 
-    // const rd = std.normalize(cameraUniform.$.rotation.mul(d.vec4f(screen, 1.25, 1))).xyz; // ray direction
     const result = march(ro, rd, false); // x = distance, y = hit
 
-    // if (result.x === 0) {
-    //   return d.vec4f(0, 0, 0, 1);
-    // }
+    if (debugBoundingsUniform.$ > 0) {
+      if (result.x === 0) {
+        return d.vec4f(0, 0, 0, 1);
+      }
 
-    // return d.vec4f(1, 0, 0, 1);
+      return d.vec4f(1, 0, 0, 1);
+    }
 
     if (result.y < 1) { // ray didnt hit
       return d.vec4f(0, 0, 0, 1); // bg
