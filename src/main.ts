@@ -9,7 +9,7 @@ import { aabbSphere, frustumIntersectsAABB, rayAABBIntersection } from "./distan
 
 const root = await tgpu.init();
 
-const tiles = d.vec2u(2, 2);
+const tiles = d.vec2f(2, 2);
 export function setTiles(x: number, y: number) {
   tiles.x = x;
   tiles.y = y;
@@ -49,10 +49,11 @@ const cameraUniform = root.createUniform(Camera);
 const { state: cameraState, updatePosition, updateFrustum } = setupFirstPersonCamera(
   canvas,
   {
-    initPos: d.vec3f(0, 0.12, -0.01),
+    initPos: d.vec3f(0, 0.00, 0),
     speed: d.vec3f(0.001, 0.01, 1),
     orbitSensitivity: 0.002,
   },
+  tiles,
   (props) => {
     cameraUniform.writePartial(props);
   },
@@ -66,7 +67,7 @@ const dynamicSpheresCountBuffer = root.createBuffer(d.u32).$usage("storage");
 dynamicSpheresCountBuffer.write(dynamicSpheresCount);
 
 const dynamicSpheresArray = new Float32Array(MAX_DYNAMIC_SPHERES * 4);
-dynamicSpheresArray.set([0, 0, 0, 0.1], 0); // initial sphere
+dynamicSpheresArray.set([0, 0, 1, 0.1], 0); // initial sphere
 dynamicSpheresBuffer.write(dynamicSpheresArray);
 
 const mainLayout = tgpu.bindGroupLayout({
@@ -107,6 +108,7 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
 window.addEventListener("keydown", async (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === "f") {
     updateFrustum();
+    // prepareTiles();
   }
 
   if (event.key.toLowerCase() === "e") {
@@ -300,7 +302,7 @@ function frustumTest() {
 
     const aabb = aabbSphere(pos, radius, smoothness);
 
-    if (frustumIntersectsAABB(cameraState.frustum, aabb)) {
+    if (frustumIntersectsAABB(cameraState.frustum[0][0], aabb)) {
       console.log("Sphere", i, "is visible");
     }
     else {
@@ -309,16 +311,80 @@ function frustumTest() {
   }
 }
 
-function prepareTiles() {
+// function buildTile(x: number, y: number) {
+//   "use gpu";
 
-}
+//   const left = d.vec4f(cameraState.frustum[0]);
+//   const right = d.vec4f(cameraState.frustum[1]);
+//   const bottom = d.vec4f(cameraState.frustum[2]);
+//   const top = d.vec4f(cameraState.frustum[3]);
+//   const near = d.vec4f(cameraState.frustum[4]);
+//   const far = d.vec4f(cameraState.frustum[5]);
+
+//   const xa = (x / tiles.x);
+//   const xb = ((tiles.x - (x + 1)) / tiles.x);
+//   const ya = (y / tiles.y);
+//   const yb = ((tiles.y - (y + 1)) / tiles.y);
+
+//   // console.log(x, y, xa, xb, ya, yb);
+
+//   const leftMove = (left - right) * xa;
+//   const rightMove = (right - left) * xb;
+//   const bottomMove = (bottom - top) * ya;
+//   const topMove = (top - bottom) * yb;
+
+//   const tileFrustum = [
+//     left + leftMove,
+//     right + rightMove,
+//     bottom + bottomMove,
+//     top + topMove,
+//     near,
+//     far
+//   ];
+
+//   // if (x === 0) {
+//   //   console.log(left, right);
+//   // }
+
+//   let objectsInTile = 0;
+//   for (let i = 0; i < dynamicSpheresCount; i++) {
+//     const index = i * 4;
+//     const pos = d.vec3f(dynamicSpheresArray[index], dynamicSpheresArray[index + 1], dynamicSpheresArray[index + 2]);
+//     const radius = dynamicSpheresArray[index + 3];
+
+//     const aabb = aabbSphere(pos, radius, smoothness);
+
+//     if (frustumIntersectsAABB(tileFrustum, aabb)) {
+//       // console.log("Sphere", i, "is visible in tile", x, y);
+//       objectsInTile += 1;
+//     }
+//   }
+//   return objectsInTile
+// }
+
+// function prepareTiles() {
+//   const results: number[][] = [];
+//   for (let x = 0; x < tiles.x; x++) {
+//     results.push([]);
+//     for (let y = 0; y < tiles.y; y++) {
+//       results[x].push(0);
+//     }
+//   }
+
+//   for (let x = 0; x < tiles.x; x++) {
+//     for (let y = 0; y < tiles.y; y++) {
+//       results[y][x] = (buildTile(d.f32(x), d.f32(y)));
+//     }
+//   }
+//   console.log(results.map(row => row.map(x => x.toString().padStart(3, " ")).join(" ")).join("\n"));
+// }
 
 function render() {
   updatePosition();
 
-  // frustumTest();
+  frustumTest();
 
-  prepareTiles();
+  // prepareTiles();
 
   tilePipeline.
     with(mainBindGroup).

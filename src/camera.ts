@@ -1,5 +1,6 @@
 import { d, std } from "typegpu";
 import * as m from 'wgpu-matrix';
+import { vec3, vec4 } from "wgpu-matrix";
 
 export const Camera = d.struct({
     position: d.vec3f,
@@ -21,9 +22,16 @@ const cameraDefaults: Partial<CameraOptions> = {
     speed: d.vec3f(1, 1, 1),
 };
 
+type Corners = {
+    topLeft: d.v3f;
+    topRight: d.v3f;
+    bottomRight: d.v3f;
+    bottomLeft: d.v3f;
+}
 export function setupFirstPersonCamera(
     canvas: HTMLCanvasElement,
     partialOptions: CameraOptions,
+    tiles: d.v2f,
     callback: (updatedProps: Partial<d.Infer<typeof Camera>>) => void,
 ) {
     const options = { ...cameraDefaults, ...partialOptions } as Required<CameraOptions>;
@@ -34,7 +42,7 @@ export function setupFirstPersonCamera(
         yaw: 0,
         pitch: 0,
         mouse: d.vec2f(0, 0),
-        frustum: d.arrayOf(d.vec4f, 6)(),
+        frustum: d.arrayOf(d.arrayOf(d.arrayOf(d.vec4f, 6), tiles.y), tiles.x)(),
         view: d.mat4x4f(),
         projection: d.mat4x4f(),
     };
@@ -71,7 +79,24 @@ export function setupFirstPersonCamera(
 
     function updateFrustum() {
         const viewProj = cameraState.projection.mul(cameraState.view);
-        cameraState.frustum = frustumFromViewProjection(viewProj);
+        const invViewProj = invertMat(viewProj);
+
+        const { near, far } = getFrustumCorners(invViewProj);
+
+        for (let x = 0; x < tiles.x; x++) {
+            for (let y = 0; y < tiles.y; y++) {
+                cameraState.frustum[x][y] = generateFrustumTile(d.f32(x), d.f32(y), near, far);
+            }
+        }
+    }
+
+    function generateFrustumTile(x: number, y: number, nearCorners: Corners, farCorners: Corners) {
+        // const xa = (x / tiles.x);
+        // const xb = ((tiles.x - (x + 1)) / tiles.x);
+        // const ya = (y / tiles.y);
+        // const yb = ((tiles.y - (y + 1)) / tiles.y);
+
+        return getFrustumPlanes(nearCorners, farCorners)
     }
 
     function rotateCamera(dx: number, dy: number) {
@@ -196,79 +221,101 @@ function invertMat(matrix: d.m4x4f) {
     return m.mat4.invert(matrix, d.mat4x4f());
 }
 
-export function frustumFromViewProjection(viewProj: d.m4x4f) {
-    // Matrix is column-major in wgpu-matrix
-    // Row 0: m[0], m[4], m[8], m[12]
-    // Row 1: m[1], m[5], m[9], m[13]
-    // Row 2: m[2], m[6], m[10], m[14]
-    // Row 3: m[3], m[7], m[11], m[15]
+function getFrustumCorners(invViewProj: d.m4x4f): { near: Corners; far: Corners } {
+    const clipCorners = [
+        // near plane, z = 0
+        [-1, -1, 0, 1],
+        [1, -1, 0, 1],
+        [1, 1, 0, 1],
+        [-1, 1, 0, 1],
 
-    // Left plane: row3 + row0
-    const left = normalizePlane(
-        viewProj[3] + viewProj[0],
-        viewProj[7] + viewProj[4],
-        viewProj[11] + viewProj[8],
-        viewProj[15] + viewProj[12],
-    );
+        // far plane, z = 1
+        [-1, -1, 1, 1],
+        [1, -1, 1, 1],
+        [1, 1, 1, 1],
+        [-1, 1, 1, 1],
+    ] as const;
 
-    // Right plane: row3 - row0
-    const right = normalizePlane(
-        viewProj[3] - viewProj[0],
-        viewProj[7] - viewProj[4],
-        viewProj[11] - viewProj[8],
-        viewProj[15] - viewProj[12],
-    );
+    const corners = clipCorners.map((p) => {
+        const world = vec4.transformMat4(p, invViewProj, d.vec4f());
 
-    // Bottom plane: row3 + row1
-    const bottom = normalizePlane(
-        viewProj[3] + viewProj[1],
-        viewProj[7] + viewProj[5],
-        viewProj[11] + viewProj[9],
-        viewProj[15] + viewProj[13],
-    );
+        return d.vec3f(
+            world[0] / world[3],
+            world[1] / world[3],
+            world[2] / world[3],
+        );
+    });
 
-    // Top plane: row3 - row1
-    const top = normalizePlane(
-        viewProj[3] - viewProj[1],
-        viewProj[7] - viewProj[5],
-        viewProj[11] - viewProj[9],
-        viewProj[15] - viewProj[13],
-    );
-
-    // Near plane: row3 + row2
-    const near = normalizePlane(
-        viewProj[3] + viewProj[2],
-        viewProj[7] + viewProj[6],
-        viewProj[11] + viewProj[10],
-        viewProj[15] + viewProj[14],
-    );
-
-    // Far plane: row3 - row2
-    const far = normalizePlane(
-        viewProj[3] - viewProj[2],
-        viewProj[7] - viewProj[6],
-        viewProj[11] - viewProj[10],
-        viewProj[15] - viewProj[14],
-    );
-
-    return [
-        left,
-        right,
-        bottom,
-        top,
-        near,
-        far
-    ];
+    return {
+        near: {
+            bottomLeft: corners[0],
+            bottomRight: corners[1],
+            topRight: corners[2],
+            topLeft: corners[3],
+        },
+        far: {
+            bottomLeft: corners[4],
+            bottomRight: corners[5],
+            topRight: corners[6],
+            topLeft: corners[7],
+        }
+    };
 }
 
-function createPlane(normal: d.v3f, distance: number) {
+function planeFromPoints(a: d.v3f, b: d.v3f, c: d.v3f) {
+    "use gpu";
+
+    const ab = b - a;
+    const ac = c - a;
+
+    const normal = std.normalize(std.cross(ab, ac));
+    const distance = -std.dot(normal, a);
+
     return d.vec4f(normal, distance);
 }
 
-function normalizePlane(a: number, b: number, c: number, dd: number) {
-    const len = Math.sqrt(a * a + b * b + c * c);
-    if (len === 0) {
-        return createPlane(d.vec3f(0, 0, 0), 0);
-    }
-    return createPlane(d.vec3f(a / len, b / len, c / len), dd / len);
+function getFrustumPlanes(near: Corners, far: Corners) {
+    return [
+        // near
+        planeFromPoints(
+            near.bottomLeft,
+            near.topLeft,
+            near.topRight,
+        ),
+
+        // far
+        planeFromPoints(
+            far.bottomRight,
+            far.topRight,
+            far.topLeft,
+        ),
+
+        // left
+        planeFromPoints(
+            far.bottomLeft,
+            far.topLeft,
+            near.topLeft,
+        ),
+
+        // right
+        planeFromPoints(
+            near.bottomRight,
+            near.topRight,
+            far.topRight,
+        ),
+
+        // top
+        planeFromPoints(
+            near.topLeft,
+            far.topLeft,
+            far.topRight,
+        ),
+
+        // bottom
+        planeFromPoints(
+            far.bottomLeft,
+            near.bottomLeft,
+            near.bottomRight,
+        ),
+    ];
 }
