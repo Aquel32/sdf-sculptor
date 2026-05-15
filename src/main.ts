@@ -6,14 +6,19 @@ import { PrepareUI } from "./ui-controls";
 import { Camera, setupFirstPersonCamera } from "./camera";
 import { aabbSphere, frustumIntersectsAABB, rayAABBIntersection } from "./distance-functions";
 
+const PIXEL_RATIO = window.devicePixelRatio;
 
 const root = await tgpu.init();
 
+
+const tilesCountUniform = root.createUniform(d.vec2f);
 const tiles = d.vec2f(2, 2);
 export function setTiles(x: number, y: number) {
   tiles.x = x;
   tiles.y = y;
+  tilesCountUniform.write(tiles);
 }
+const currentTileUniform = root.createUniform(d.vec2u);
 
 let smoothness = 0.001;
 export const smoothnessUniform = root.createUniform(d.f32);
@@ -34,8 +39,11 @@ PrepareUI();
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
 
+export const MAX_TILES = 2;
+export const [width, height] = [canvas.clientWidth, canvas.clientHeight].map(v => v * PIXEL_RATIO);
+
 const finalTexture = root.createTexture({
-  size: [canvas.clientWidth, canvas.clientHeight],
+  size: [width, height],
   format: "rgba8unorm",
 }).$usage("storage", "sampled");
 const writeView = finalTexture.createView(d.textureStorage2d("rgba8unorm", "write-only"));
@@ -59,7 +67,7 @@ const { state: cameraState, updatePosition, updateFrustum } = setupFirstPersonCa
   },
 );
 
-const MAX_DYNAMIC_SPHERES = 1000;
+const MAX_DYNAMIC_SPHERES = 10;
 const dynamicSpheresBuffer = root.createBuffer(d.arrayOf(d.vec4f, MAX_DYNAMIC_SPHERES)).$usage("storage");
 
 let dynamicSpheresCount = 1;
@@ -70,14 +78,19 @@ const dynamicSpheresArray = new Float32Array(MAX_DYNAMIC_SPHERES * 4);
 dynamicSpheresArray.set([0, 0, 1, 0.1], 0); // initial sphere
 dynamicSpheresBuffer.write(dynamicSpheresArray);
 
+const indexesInTileBuffer = root.createBuffer(d.arrayOf(d.arrayOf(d.arrayOf(d.i32, MAX_DYNAMIC_SPHERES), MAX_TILES), MAX_TILES)).$usage("storage");
+const indexesInTileArray = d.arrayOf(d.arrayOf(d.arrayOf(d.i32, MAX_DYNAMIC_SPHERES), MAX_TILES), MAX_TILES)();
+
 const mainLayout = tgpu.bindGroupLayout({
   spheres: { storage: d.arrayOf(d.vec4f), access: "mutable" },
   count: { storage: d.u32, access: "mutable" },
+  indexesInTile: { storage: d.arrayOf(d.arrayOf(d.arrayOf(d.i32, MAX_DYNAMIC_SPHERES), MAX_TILES), MAX_TILES), access: "mutable" },
 });
 
 const mainBindGroup = root.createBindGroup(mainLayout, {
   spheres: dynamicSpheresBuffer,
   count: dynamicSpheresCountBuffer,
+  indexesInTile: indexesInTileBuffer,
 });
 
 const foundPositionMutable = root.createMutable(d.vec4f);
@@ -89,10 +102,15 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
   }
 
   const ray = getRay(cameraUniform.$.mouse);
+
+
+  const tileSize = 1 / tilesCountUniform.$;
+  const tile = d.vec2u(std.floor(cameraUniform.$.mouse / PIXEL_RATIO / tileSize));
+
   const ro = ray.ro;
   const rd = ray.rd;
 
-  const result = march(ro, rd, true); // x = distance, y = hit
+  const result = march(ro, rd, true, tile); // x = distance, y = hit
 
   if (result.y < 1) {
     foundPositionMutable.$ = d.vec4f(0, 0, 0, 0);
@@ -108,7 +126,7 @@ const addDynamicSphereComputePipeline = root.createGuardedComputePipeline(() => 
 window.addEventListener("keydown", async (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === "f") {
     updateFrustum();
-    // prepareTiles();
+    prepareTiles();
   }
 
   if (event.key.toLowerCase() === "e") {
@@ -138,6 +156,7 @@ window.addEventListener("keydown", async (event: KeyboardEvent) => {
     dynamicSpheresBuffer.write(dynamicSpheresArray);
 
     console.log("Added sphere", dynamicSpheresCount);
+
   }
 });
 
@@ -172,14 +191,20 @@ const Ray = d.struct({
   rd: d.vec3f,
 });
 
-function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
+function march(ro: d.v3f, rd: d.v3f, asd: boolean, tile: d.v2u) {
   'use gpu';
   let t = d.f32(0);
   let hit = d.f32(0);
 
   let closestIntersection = d.f32(9090);
   let farthestIntersection = d.f32(-1);
-  for (let i = d.u32(0); i < mainLayout.$.count; i++) {
+
+  for (let i = 0; i < MAX_DYNAMIC_SPHERES; i++) {
+    const sphereIndex = mainLayout.$.indexesInTile[tile.x][tile.y][i];
+    if (sphereIndex === -1) {
+      break;
+    }
+
     const spherePos = mainLayout.$.spheres[i].xyz;
     const sphereRadius = mainLayout.$.spheres[i].w;
 
@@ -191,6 +216,19 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
       farthestIntersection = std.max(farthestIntersection, intersection.far);
     }
   }
+
+  // for (let i = d.u32(0); i < mainLayout.$.count; i++) {
+  //   const spherePos = mainLayout.$.spheres[i].xyz;
+  //   const sphereRadius = mainLayout.$.spheres[i].w;
+
+  //   const aabb = aabbSphere(spherePos, sphereRadius, smoothnessUniform.$);
+  //   const intersection = rayAABBIntersection(ro, rd, aabb);
+
+  //   if (intersection.near !== -1) {
+  //     closestIntersection = std.min(closestIntersection, intersection.near);
+  //     farthestIntersection = std.max(farthestIntersection, intersection.far);
+  //   }
+  // }
 
   // ray didnt hit, skip marching
   if (closestIntersection === 9090) {
@@ -231,7 +269,7 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean) {
 function getRay(uv: d.v2f) {
   "use gpu";
 
-  const screen = d.vec4f(uv * 2 - 1, -1, 1);
+  const screen = d.vec4f(uv * 2 - 1, 0, 1);
 
   const viewPos = cameraUniform.$.inverseProjection.mul(screen);
   const viewPosNormalized = d.vec4f(viewPos.xyz / viewPos.w, 1);
@@ -254,21 +292,34 @@ const pipeline = root.createRenderPipeline({
   },
 });
 
-function writeToTexture(xy: d.v2i, color: d.v4f) {
+function writeToTexture(xy: d.v2u, color: d.v4f) {
   "use gpu";
   std.textureStore(writeView.$, xy, color);
 }
 
 const tilePipeline = root.createGuardedComputePipeline((x, y) => {
   "use gpu";
-  const xy = d.vec2i(x, y);
-  const uv = d.vec2f(xy) / d.vec2f(std.textureDimensions(writeView.$));
+
+  const textureSize = d.vec2f(std.textureDimensions(writeView.$))
+  const tile = currentTileUniform.$;
+  const tileSize = d.vec2u((textureSize) / tilesCountUniform.$);
+
+  const xy = d.vec2u(x + tile.x * tileSize.x, y + tile.y * tileSize.y);
+  const uv = d.vec2f(xy) / textureSize;
+
+  if (tile.x === 1 && tile.y === 0) {
+    if (x === 0 && y === 0) {
+      console.log(xy, uv, getRay(uv));
+      // console.log("GPU:", tile.x, tile.y, mainLayout.$.indexesInTile[tile.x][tile.y]);
+    }
+  }
+
 
   const ray = getRay(uv);
   const ro = ray.ro;
   const rd = ray.rd;
 
-  const result = march(ro, rd, false); // x = distance, y = hit
+  const result = march(ro, rd, false, tile); // x = distance, y = hit
 
   if (debugBoundingsUniform.$ > 0) {
     if (result.x === 0) {
@@ -311,84 +362,86 @@ function frustumTest() {
   }
 }
 
-// function buildTile(x: number, y: number) {
-//   "use gpu";
+function buildTile(x: number, y: number) {
+  "use gpu";
 
-//   const left = d.vec4f(cameraState.frustum[0]);
-//   const right = d.vec4f(cameraState.frustum[1]);
-//   const bottom = d.vec4f(cameraState.frustum[2]);
-//   const top = d.vec4f(cameraState.frustum[3]);
-//   const near = d.vec4f(cameraState.frustum[4]);
-//   const far = d.vec4f(cameraState.frustum[5]);
+  const tileFrustum = cameraState.frustum[x][y];
 
-//   const xa = (x / tiles.x);
-//   const xb = ((tiles.x - (x + 1)) / tiles.x);
-//   const ya = (y / tiles.y);
-//   const yb = ((tiles.y - (y + 1)) / tiles.y);
+  for (let i = 0; i < MAX_DYNAMIC_SPHERES; i++) {
+    indexesInTileArray[x][y][i] = -1;
+  }
 
-//   // console.log(x, y, xa, xb, ya, yb);
+  let objectsInTile = 0;
+  for (let i = 0; i < dynamicSpheresCount; i++) {
+    const index = i * 4;
+    const pos = d.vec3f(dynamicSpheresArray[index], dynamicSpheresArray[index + 1], dynamicSpheresArray[index + 2]);
+    const radius = dynamicSpheresArray[index + 3];
 
-//   const leftMove = (left - right) * xa;
-//   const rightMove = (right - left) * xb;
-//   const bottomMove = (bottom - top) * ya;
-//   const topMove = (top - bottom) * yb;
+    const aabb = aabbSphere(pos, radius, smoothness);
 
-//   const tileFrustum = [
-//     left + leftMove,
-//     right + rightMove,
-//     bottom + bottomMove,
-//     top + topMove,
-//     near,
-//     far
-//   ];
+    if (frustumIntersectsAABB(tileFrustum, aabb)) {
+      // console.log("Sphere", i, "is visible in tile", x, y);
+      indexesInTileArray[x][y][objectsInTile] = i;
+      objectsInTile += 1;
+    }
+  }
+  return objectsInTile
+}
 
-//   // if (x === 0) {
-//   //   console.log(left, right);
-//   // }
+function prepareTiles() {
+  const result: number[][] = [];
+  let sum = 0;
+  for (let y = 0; y < tiles.y; y++) {
+    const row: number[] = [];
+    for (let x = 0; x < tiles.x; x++) {
+      const count = buildTile(x, y);
+      row.push(count);
+      sum += count;
+    }
+    result.push(row);
+  }
 
-//   let objectsInTile = 0;
-//   for (let i = 0; i < dynamicSpheresCount; i++) {
-//     const index = i * 4;
-//     const pos = d.vec3f(dynamicSpheresArray[index], dynamicSpheresArray[index + 1], dynamicSpheresArray[index + 2]);
-//     const radius = dynamicSpheresArray[index + 3];
+  const tileTotalCount = tiles.x * tiles.y;
 
-//     const aabb = aabbSphere(pos, radius, smoothness);
+  // console.log(indexesInTileArray.map(r => r.map(c => c.join(",")).join(" | ")).join("\n"));
 
-//     if (frustumIntersectsAABB(tileFrustum, aabb)) {
-//       // console.log("Sphere", i, "is visible in tile", x, y);
-//       objectsInTile += 1;
-//     }
-//   }
-//   return objectsInTile
-// }
 
-// function prepareTiles() {
-//   const results: number[][] = [];
-//   for (let x = 0; x < tiles.x; x++) {
-//     results.push([]);
-//     for (let y = 0; y < tiles.y; y++) {
-//       results[x].push(0);
-//     }
-//   }
 
-//   for (let x = 0; x < tiles.x; x++) {
-//     for (let y = 0; y < tiles.y; y++) {
-//       results[y][x] = (buildTile(d.f32(x), d.f32(y)));
-//     }
-//   }
-//   console.log(results.map(row => row.map(x => x.toString().padStart(3, " ")).join(" ")).join("\n"));
-// }
+
+  for (let x = 0; x < tiles.x; x++) {
+    for (let y = 0; y < tiles.y; y++) {
+      // console.log("CPU:", y, x, indexesInTileArray[y][x])
+    }
+  }
+
+  indexesInTileBuffer.write(indexesInTileArray);
+  // console.log(result.map(r => r.join(" ")).join("\n"));
+  // const before = dynamicSpheresCount;
+  // sum /= tileTotalCount;
+  // console.log(`avg obj/tile: ${sum}. (before: ${before}). (${(sum / before * 100).toFixed(2)}%)`);
+}
+
+
 
 function render() {
   updatePosition();
 
-  frustumTest();
+  // frustumTest();
 
-  // prepareTiles();
+  updateFrustum();
 
-  tilePipeline.
-    with(mainBindGroup).
-    dispatchThreads(canvas.width, canvas.height);
+  prepareTiles();
+
+  const threadsInTile = d.vec2u((width) / tiles.y, (height / tiles.x));
+  for (let y = 0; y < tiles.y; y++) {
+    for (let x = 0; x < tiles.x; x++) {
+      currentTileUniform.write(d.vec2u(x, y));
+
+      tilePipeline.
+        with(mainBindGroup).
+        dispatchThreads(threadsInTile.x, threadsInTile.y);
+    }
+  }
 
   pipeline.
     withColorAttachment({ view: context }).

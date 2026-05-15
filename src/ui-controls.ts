@@ -6,8 +6,8 @@ export function PrepareUI() {
     <canvas id="canvas" width="1920" height="1920"></canvas>
 
     <div>
-    <label>Tiles X: <input id="tilesX" type="number" min="1" max="10" step="1" value="3"></label>
-    <label>Tiles Y: <input id="tilesY" type="number" min="1" max="10" step="1" value="3"></label>
+    <label>Tiles X: <input id="tilesX" type="number" min="1" max="10" step="1" value="2"></label>
+    <label>Tiles Y: <input id="tilesY" type="number" min="1" max="10" step="1" value="2"></label>
     <label>K: <input id="k" type="range" min="0.0001" max="2" step="0.01" value="0.0001"></label>
     <label>Debug Boundings: <input id="debugBoundings" type="checkbox"></label>
     </div>

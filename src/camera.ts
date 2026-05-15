@@ -1,6 +1,6 @@
 import { d, std } from "typegpu";
 import * as m from 'wgpu-matrix';
-import { vec3, vec4 } from "wgpu-matrix";
+import { MAX_TILES } from "./main";
 
 export const Camera = d.struct({
     position: d.vec3f,
@@ -42,7 +42,7 @@ export function setupFirstPersonCamera(
         yaw: 0,
         pitch: 0,
         mouse: d.vec2f(0, 0),
-        frustum: d.arrayOf(d.arrayOf(d.arrayOf(d.vec4f, 6), tiles.y), tiles.x)(),
+        frustum: d.arrayOf(d.arrayOf(d.arrayOf(d.vec4f, 6), MAX_TILES), MAX_TILES)(),
         view: d.mat4x4f(),
         projection: d.mat4x4f(),
     };
@@ -63,7 +63,7 @@ export function setupFirstPersonCamera(
         cameraState.view = view;
         cameraState.projection = projection;
 
-        updateFrustum();
+        // updateFrustum();
 
         callback(
             Camera({
@@ -91,12 +91,38 @@ export function setupFirstPersonCamera(
     }
 
     function generateFrustumTile(x: number, y: number, nearCorners: Corners, farCorners: Corners) {
-        // const xa = (x / tiles.x);
-        // const xb = ((tiles.x - (x + 1)) / tiles.x);
-        // const ya = (y / tiles.y);
-        // const yb = ((tiles.y - (y + 1)) / tiles.y);
+        "use gpu";
 
-        return getFrustumPlanes(nearCorners, farCorners)
+        const x0 = x / tiles.x;
+        const x1 = (x + 1) / tiles.x;
+        const y0 = y / tiles.y;
+        const y1 = (y + 1) / tiles.y;
+
+        const nearBottomLeft = nearCorners.bottomLeft + (nearCorners.topLeft - nearCorners.bottomLeft).mul(y0);
+        const nearBottomRight = nearCorners.bottomRight + (nearCorners.topRight - nearCorners.bottomRight).mul(y0);
+        const nearTopLeft = nearCorners.bottomLeft + (nearCorners.topLeft - nearCorners.bottomLeft).mul(y1);
+        const nearTopRight = nearCorners.bottomRight + (nearCorners.topRight - nearCorners.bottomRight).mul(y1);
+
+        const farBottomLeft = farCorners.bottomLeft + (farCorners.topLeft - farCorners.bottomLeft).mul(y0);
+        const farBottomRight = farCorners.bottomRight + (farCorners.topRight - farCorners.bottomRight).mul(y0);
+        const farTopLeft = farCorners.bottomLeft + (farCorners.topLeft - farCorners.bottomLeft).mul(y1);
+        const farTopRight = farCorners.bottomRight + (farCorners.topRight - farCorners.bottomRight).mul(y1);
+
+        const nearNew: Corners = {
+            bottomLeft: nearBottomLeft + (nearBottomRight - nearBottomLeft).mul(x0),
+            bottomRight: nearBottomLeft + (nearBottomRight - nearBottomLeft).mul(x1),
+            topLeft: nearTopLeft + (nearTopRight - nearTopLeft).mul(x0),
+            topRight: nearTopLeft + (nearTopRight - nearTopLeft).mul(x1),
+        };
+
+        const farNew: Corners = {
+            bottomLeft: farBottomLeft + (farBottomRight - farBottomLeft).mul(x0),
+            bottomRight: farBottomLeft + (farBottomRight - farBottomLeft).mul(x1),
+            topLeft: farTopLeft + (farTopRight - farTopLeft).mul(x0),
+            topRight: farTopLeft + (farTopRight - farTopLeft).mul(x1),
+        };
+
+        return getFrustumPlanes(nearNew, farNew)
     }
 
     function rotateCamera(dx: number, dy: number) {
@@ -213,7 +239,7 @@ export function calculateView(position: d.v3f, target: d.v3f, up: d.v3f = d.vec3
     return m.mat4.lookAt(position, target, up, d.mat4x4f());
 }
 
-export function calculateProj(aspectRatio: number, fov: number = Math.PI / 2, near: number = 0.001, far: number = 1000) {
+export function calculateProj(aspectRatio: number, fov: number = Math.PI / 2, near: number = 0.1, far: number = 1000) {
     return m.mat4.perspective(fov, aspectRatio, near, far, d.mat4x4f());
 }
 
@@ -237,7 +263,7 @@ function getFrustumCorners(invViewProj: d.m4x4f): { near: Corners; far: Corners 
     ] as const;
 
     const corners = clipCorners.map((p) => {
-        const world = vec4.transformMat4(p, invViewProj, d.vec4f());
+        const world = m.vec4.transformMat4(p, invViewProj, d.vec4f());
 
         return d.vec3f(
             world[0] / world[3],
