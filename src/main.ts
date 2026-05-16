@@ -39,7 +39,7 @@ PrepareUI();
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
 
-export const MAX_TILES = 2;
+export const MAX_TILES = 10;
 export const [width, height] = [canvas.clientWidth, canvas.clientHeight].map(v => v * PIXEL_RATIO);
 
 const finalTexture = root.createTexture({
@@ -67,7 +67,7 @@ const { state: cameraState, updatePosition, updateFrustum } = setupFirstPersonCa
   },
 );
 
-const MAX_DYNAMIC_SPHERES = 10;
+const MAX_DYNAMIC_SPHERES = 100;
 const dynamicSpheresBuffer = root.createBuffer(d.arrayOf(d.vec4f, MAX_DYNAMIC_SPHERES)).$usage("storage");
 
 let dynamicSpheresCount = 1;
@@ -156,7 +156,6 @@ window.addEventListener("keydown", async (event: KeyboardEvent) => {
     dynamicSpheresBuffer.write(dynamicSpheresArray);
 
     console.log("Added sphere", dynamicSpheresCount);
-
   }
 });
 
@@ -205,8 +204,8 @@ function march(ro: d.v3f, rd: d.v3f, asd: boolean, tile: d.v2u) {
       break;
     }
 
-    const spherePos = mainLayout.$.spheres[i].xyz;
-    const sphereRadius = mainLayout.$.spheres[i].w;
+    const spherePos = mainLayout.$.spheres[sphereIndex].xyz;
+    const sphereRadius = mainLayout.$.spheres[sphereIndex].w;
 
     const aabb = aabbSphere(spherePos, sphereRadius, smoothnessUniform.$);
     const intersection = rayAABBIntersection(ro, rd, aabb);
@@ -309,11 +308,10 @@ const tilePipeline = root.createGuardedComputePipeline((x, y) => {
 
   if (tile.x === 1 && tile.y === 0) {
     if (x === 0 && y === 0) {
-      console.log(xy, uv, getRay(uv));
+      // console.log(xy, uv, getRay(uv));
       // console.log("GPU:", tile.x, tile.y, mainLayout.$.indexesInTile[tile.x][tile.y]);
     }
   }
-
 
   const ray = getRay(uv);
   const ro = ray.ro;
@@ -416,9 +414,9 @@ function prepareTiles() {
 
   indexesInTileBuffer.write(indexesInTileArray);
   // console.log(result.map(r => r.join(" ")).join("\n"));
-  // const before = dynamicSpheresCount;
-  // sum /= tileTotalCount;
-  // console.log(`avg obj/tile: ${sum}. (before: ${before}). (${(sum / before * 100).toFixed(2)}%)`);
+  const before = dynamicSpheresCount;
+  sum /= tileTotalCount;
+  console.log(`avg obj/tile: ${sum}. (before: ${before}). (${(sum / before * 100).toFixed(2)}%)`);
 }
 
 
