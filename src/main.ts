@@ -34,7 +34,7 @@ export function setDebugBoundings(value: number) {
   debugBoundingsUniform.write(value);
 }
 
-PrepareUI();
+const ui = PrepareUI();
 
 const canvas = document.querySelector<HTMLCanvasElement>("#canvas")!;
 const context = root.configureContext({ canvas });
@@ -416,12 +416,18 @@ function prepareTiles() {
   // console.log(result.map(r => r.join(" ")).join("\n"));
   const before = dynamicSpheresCount;
   sum /= tileTotalCount;
-  console.log(`avg obj/tile: ${sum}. (before: ${before}). (${(sum / before * 100).toFixed(2)}%)`);
+  const stats = `avg obj/tile: ${sum.toFixed(2)}. (before: ${before}). (${(sum / before * 100).toFixed(2)}%)`;
+  console.log(stats);
+  ui.statisticsText.textContent = stats;
 }
 
-
-
+let lastTime = performance.now();
 function render() {
+  const currentTime = performance.now();
+  const deltaTime = currentTime - lastTime;
+  lastTime = currentTime;
+  ui.fpsText.textContent = `FPS: ${Math.round(1 / (deltaTime / 1000))} (${Math.round(deltaTime)} ms)`;
+
   updatePosition();
 
   // frustumTest();

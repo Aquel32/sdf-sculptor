@@ -6,18 +6,24 @@ export function PrepareUI() {
 
     document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <canvas id="canvas" width="1920" height="1080"></canvas>
-    <div>
-        <label>
-            <span>Tiles</span>
-            X: <input id="tilesX" type="number" min="1" max="10" step="1" value="2">
-            Y: <input id="tilesY" type="number" min="1" max="10" step="1" value="2"></label>
-        <label> 
-            K: 
-            <input class="k" type="range" min="0.0001" max="2" step="0.01" value="${k}">
-            <input class="k" type="number" min="0.0001" max="2" step="0.01" value="${k}">
-        </label>
-        <label>Debug Boundings: <input id="debugBoundings" type="checkbox"></label>
-    </div>
+    <main>
+        <div>
+            <label>
+                <span>Tiles</span>
+                X: <input id="tilesX" type="number" min="1" max="10" step="1" value="2">
+                Y: <input id="tilesY" type="number" min="1" max="10" step="1" value="2"></label>
+            <label> 
+                K: 
+                <input class="k" type="range" min="0.0001" max="2" step="0.01" value="${k}">
+                <input class="k" type="number" min="0.0001" max="2" step="0.01" value="${k}">
+            </label>
+            <label>Debug Boundings: <input id="debugBoundings" type="checkbox"></label>
+        </div>
+        <div>
+            <p id="statistics"></p>
+            <p id="fps"></p>
+        </div>
+    </main>
     `;
 
     function setBothValues()
@@ -55,4 +61,9 @@ export function PrepareUI() {
     }
 
     updateUniforms();
+
+    return {
+        statisticsText: document.querySelector<HTMLParagraphElement>("#statistics")!,
+        fpsText: document.querySelector<HTMLParagraphElement>("#fps")!
+    }
 }
